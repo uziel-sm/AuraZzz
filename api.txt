@@ -1,0 +1,290 @@
+const express = require('express')
+const PORT = process.env.PORT || 5000
+var app = express();
+var fire = require('./fire')
+var cors = require('cors');
+var bodyParser = require('body-parser');
+
+app.use(cors());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: false }));
+
+// Inicializar Firestore UNA SOLA VEZ
+const db = fire.firestore();
+
+// ============================================================
+// PÁGINA DE INICIO - Documentación de la API
+// ============================================================
+app.get('/', (req, res) => {
+  res.send(`
+    <h1>API AuraZzz - Sistema de Detección de Ronquidos</h1>
+    <h2>Colecciones Firebase</h2>
+    <ul>
+      <li><b>usuarios</b> – Perfiles de usuario</li>
+      <li><b>dispositivos</b> – Configuración del ESP32</li>
+      <li><b>registro_ronquidos</b> – Eventos de ronquido individual</li>
+      <li><b>sesion_sueño</b> – Resúmenes de sesión de sueño</li>
+    </ul>
+
+    <h2>Endpoints</h2>
+    <h3>Usuarios</h3>
+    <ul>
+      <li><b>GET  /usuarios</b> – Todos los usuarios</li>
+      <li><b>GET  /usuario/:id</b> – Usuario por ID</li>
+      <li><b>POST /usuarios</b> – Crear usuario  { correo, nombre, id_dispositivo, meta_sueño }</li>
+    </ul>
+
+    <h3>Dispositivos (ESP32)</h3>
+    <ul>
+      <li><b>GET  /dispositivos</b> – Todos los dispositivos</li>
+      <li><b>GET  /dispositivo/:id</b> – Dispositivo por ID</li>
+      <li><b>POST /dispositivos</b> – Registrar dispositivo  { alarma_activa, alarma_hora, umbral }</li>
+      <li><b>PUT  /dispositivo/:id/alarma</b> – Actualizar alarma  { alarma_activa, alarma_hora }</li>
+      <li><b>GET  /dispositivo/:id/config</b> – Obtener config para el ESP32 (alarma + umbral)</li>
+    </ul>
+
+    <h3>Registro de Ronquidos</h3>
+    <ul>
+      <li><b>GET  /ronquidos</b> – Todos los registros</li>
+      <li><b>GET  /ronquido/ultimo</b> – Último ronquido registrado</li>
+      <li><b>GET  /ronquidos/recientes</b> – Últimos 10 ronquidos</li>
+      <li><b>POST /ronquidos</b> – Insertar ronquido  { id_dispositivo, duracion, intensidad_db, frecuencia_hz, timestamp }</li>
+    </ul>
+
+    <h3>Sesión de Sueño</h3>
+    <ul>
+      <li><b>GET  /sesiones</b> – Todas las sesiones</li>
+      <li><b>GET  /sesion/ultima</b> – Última sesión</li>
+      <li><b>GET  /sesiones/usuario/:user_id</b> – Sesiones por usuario</li>
+      <li><b>POST /sesiones</b> – Crear sesión  { user_id, fecha, total_ronquidos, promedio_db, pico_max_db, puntuacion_sueño }</li>
+    </ul>
+  `)
+})
+
+// ============================================================
+// USUARIOS
+// ============================================================
+
+app.get('/usuarios', (req, res) => {
+  var data = [];
+  db.collection('usuarios').get()
+    .then(snapshot => {
+      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      res.send(data);
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.get('/usuario/:id', (req, res) => {
+  db.collection('usuarios').doc(req.params.id).get()
+    .then(doc => {
+      if (!doc.exists) return res.status(404).send({ error: 'Usuario no encontrado' });
+      res.send({ id: doc.id, ...doc.data() });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.post('/usuarios', (req, res) => {
+  const nuevoUsuario = {
+    correo:         req.body.correo,
+    nombre:         req.body.nombre,
+    id_dispositivo: req.body.id_dispositivo,
+    meta_sueño:     req.body.meta_sueño || 8
+  };
+  db.collection('usuarios').add(nuevoUsuario)
+    .then(docRef => {
+      res.send({ id: docRef.id, ...nuevoUsuario, status: 'Usuario creado!' });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+// ============================================================
+// DISPOSITIVOS (ESP32)
+// ============================================================
+
+app.get('/dispositivos', (req, res) => {
+  var data = [];
+  db.collection('dispositivos').get()
+    .then(snapshot => {
+      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      res.send(data);
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.get('/dispositivo/:id', (req, res) => {
+  db.collection('dispositivos').doc(req.params.id).get()
+    .then(doc => {
+      if (!doc.exists) return res.status(404).send({ error: 'Dispositivo no encontrado' });
+      res.send({ id: doc.id, ...doc.data() });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.post('/dispositivos', (req, res) => {
+  const nuevoDispositivo = {
+    alarma_activa:   req.body.alarma_activa || false,
+    alarma_hora:     req.body.alarma_hora || "07:00",
+    umbral:          req.body.umbral || 60,
+    ultima_conexion: new Date().toJSON()
+  };
+  db.collection('dispositivos').add(nuevoDispositivo)
+    .then(docRef => {
+      res.send({ id: docRef.id, ...nuevoDispositivo, status: 'Dispositivo registrado!' });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.put('/dispositivo/:id/alarma', (req, res) => {
+  const actualizacion = {
+    alarma_activa:   req.body.alarma_activa,
+    alarma_hora:     req.body.alarma_hora,
+    ultima_conexion: new Date().toJSON()
+  };
+  db.collection('dispositivos').doc(req.params.id).update(actualizacion)
+    .then(() => {
+      res.send({ id: req.params.id, ...actualizacion, status: 'Alarma actualizada!' });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.get('/dispositivo/:id/config', (req, res) => {
+  db.collection('dispositivos').doc(req.params.id).get()
+    .then(doc => {
+      if (!doc.exists) return res.status(404).send({ error: 'Dispositivo no encontrado' });
+      const d = doc.data();
+      res.send({
+        alarma_activa: d.alarma_activa,
+        alarma_hora:   d.alarma_hora,
+        umbral:        d.umbral
+      });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+// ============================================================
+// REGISTRO DE RONQUIDOS
+// ============================================================
+
+app.get('/ronquidos', (req, res) => {
+  var data = [];
+  db.collection('registro_ronquidos').orderBy('timestamp', 'asc').get()
+    .then(snapshot => {
+      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      res.send(data);
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.get('/ronquido/ultimo', (req, res) => {
+  var data = [];
+  db.collection('registro_ronquidos').limit(1).orderBy('timestamp', 'desc').get()
+    .then(snapshot => {
+      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      res.send(data);
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.get('/ronquidos/recientes', (req, res) => {
+  var data = [];
+  db.collection('registro_ronquidos').limit(10).orderBy('timestamp', 'desc').get()
+    .then(snapshot => {
+      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      res.send(data);
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.post('/ronquidos', (req, res) => {
+  const ronquido = {
+    id_dispositivo: req.body.id_dispositivo,
+    duracion:       req.body.duracion,
+    intensidad_db:  req.body.intensidad_db,
+    frecuencia_hz:  req.body.frecuencia_hz,
+    timestamp:      new Date().toJSON()
+  };
+  db.collection('registro_ronquidos').add(ronquido)
+    .then(docRef => {
+      res.send({ id: docRef.id, ...ronquido, status: 'Ronquido registrado!' });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+// ============================================================
+// SESIÓN DE SUEÑO
+// ============================================================
+
+app.get('/sesiones', (req, res) => {
+  var data = [];
+  db.collection('sesion_sueño').orderBy('fecha', 'asc').get()
+    .then(snapshot => {
+      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      res.send(data);
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.get('/sesion/ultima', (req, res) => {
+  var data = [];
+  db.collection('sesion_sueño').limit(1).orderBy('fecha', 'desc').get()
+    .then(snapshot => {
+      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      res.send(data);
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.get('/sesiones/usuario/:user_id', (req, res) => {
+  var data = [];
+  db.collection('sesion_sueño')
+    .where('user_id', '==', req.params.user_id)
+    .orderBy('fecha', 'desc')
+    .get()
+    .then(snapshot => {
+      snapshot.forEach(doc => data.push({ id: doc.id, ...doc.data() }));
+      res.send(data);
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+app.post('/sesiones', (req, res) => {
+  const sesion = {
+    user_id:          req.body.user_id,
+    fecha:            req.body.fecha || new Date().toJSON(),
+    total_ronquidos:  req.body.total_ronquidos,
+    promedio_db:      req.body.promedio_db,
+    pico_max_db:      req.body.pico_max_db,
+    puntuacion_sueño: req.body.puntuacion_sueño
+  };
+  db.collection('sesion_sueño').add(sesion)
+    .then(docRef => {
+      res.send({ id: docRef.id, ...sesion, status: 'Sesión de sueño registrada!' });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+// ============================================================
+app.listen(PORT, () => {
+  console.log(`AuraZzz API escuchando en puerto ${PORT}`)
+})
+
+
+// Inicializar Firestore
+const db = fire.firestore();
+
+// ============================================================
+// PÁGINA DE INICIO - Documentación de la API
+// ============================================================
+app.get('/', (req, res) => {
+  res.send(`
+    <h1>API AuraZzz - Sistema de Detección de Ronquidos</h1>
+    <p>Estado: 🟢 Operacional</p>
+    <h2>Endpoints Principales</h2>
+    <ul>
+      <li><b>POST /ronquidos</b> - Para el ESP32</li>
+      <li><b>POST /sesiones</b> - Crear resumen de noche</li>
+      <li><b>GET /dispositivo/:id/config</b> - Configuración para el ESP32</li>
+    </ul>
+  `);
+});
