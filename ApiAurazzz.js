@@ -25,7 +25,7 @@ const db = fire.firestore();
 // PÁGINA DE INICIO 
 app.get('/', (req, res) => {
   res.send(`
-    <h1>API AuraZzz - Sistema de Detección de Ronquidos</h1>
+    <h1>API AuraZzz - Sistema de Detección de Ronquidos Prueba</h1>
     <p>Estado: 🟢 Operacional</p>
     <h2>Endpoints Principales</h2>
     <ul>
