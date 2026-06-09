@@ -103,7 +103,7 @@ app.post('/procesar-audio', upload.single('audio_file'), async (req, res) => {
     form.append('audio_file', fs.createReadStream(req.file.path), req.file.originalname); // Corrección para Python
 
     // 3. Petición HTTPS directa a Render 
-    // REEMPLAZA ESTA URL POR LA URL REAL QUE TE DIO RENDER PARA TU API DE PYTHON
+
     const urlPython = 'https://aurazzz-py.onrender.com/analizar-evento'; 
     
     const respuestaPython = await axios.post(urlPython, form, {
@@ -185,6 +185,115 @@ app.post('/usuarios', (req, res) => {
   db.collection('usuarios').add(nuevoUsuario)
     .then(docRef => res.send({ id: docRef.id, status: 'Usuario creado' }))
     .catch(err => res.status(500).send({ error: err.message }));
+});
+
+// ===== ENDPOINT PARA OBTENER ESTADO DE DISPOSITIVOS =====
+
+// Obtener todos los dispositivos del usuario
+app.get('/dispositivos/:usuarioId', (req, res) => {
+  db.collection('dispositivos')
+    .where('usuarioId', '==', req.params.usuarioId)
+    .get()
+    .then(snapshot => {
+      const dispositivos = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        dispositivos.push({
+          id: doc.id,
+          nombre: data.nombre || 'Dispositivo',
+          conectado: data.conectado || false,
+          ultimaConexion: data.ultimaConexion ? data.ultimaConexion.toDate() : null,
+          alarma_activa: data.alarma_activa || false,
+          alarma_hora: data.alarma_hora || '07:00',
+          umbral: data.umbral || 30,
+          sesion_sueño_id: data.sesion_sueño_id || null,
+        });
+      });
+      res.send({ dispositivos });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+// Obtener estado de un dispositivo específico
+app.get('/dispositivo/:id/estado', (req, res) => {
+  db.collection('dispositivos').doc(req.params.id).get()
+    .then(doc => {
+      if (!doc.exists) {
+        return res.status(404).send({ 
+          error: 'No encontrado',
+          conectado: false 
+        });
+      }
+      const d = doc.data();
+      res.send({
+        id: doc.id,
+        nombre: d.nombre || 'Dispositivo',
+        conectado: d.conectado || false,
+        ultimaConexion: d.ultimaConexion ? d.ultimaConexion.toDate() : null,
+        alarma_activa: d.alarma_activa || false,
+        alarma_hora: d.alarma_hora || '07:00',
+        umbral: d.umbral || 30,
+        sesion_sueño_id: d.sesion_sueño_id || null,
+      });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+// ===== ENDPOINT PARA CONECTAR DISPOSITIVO =====
+
+// Registrar/conectar un nuevo dispositivo
+app.post('/dispositivo/registrar', (req, res) => {
+  const { usuarioId, nombreDispositivo, id_dispositivo } = req.body;
+  
+  if (!usuarioId || !id_dispositivo) {
+    return res.status(400).send({ 
+      error: 'Faltan usuarioId o id_dispositivo' 
+    });
+  }
+
+  const dispositivoData = {
+    usuarioId: usuarioId,
+    nombre: nombreDispositivo || 'AURAZZZ_' + id_dispositivo,
+    deviceId: id_dispositivo,
+    conectado: true,
+    ultimaConexion: admin.firestore.FieldValue.serverTimestamp(),
+    alarma_activa: false,
+    alarma_hora: '07:00',
+    umbral: 30,
+    sesion_sueño_id: null,
+    fechaRegistro: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  // Usar el deviceId como documento ID
+  db.collection('dispositivos').doc(id_dispositivo).set(dispositivoData, { merge: true })
+    .then(() => {
+      res.send({ 
+        status: 'Dispositivo registrado',
+        id: id_dispositivo,
+        mensaje: 'ESP32 conectado exitosamente'
+      });
+    })
+    .catch(err => res.status(500).send({ error: err.message }));
+});
+
+// Verificar conexión periódica (heartbeat)
+app.post('/dispositivo/:id/heartbeat', (req, res) => {
+  db.collection('dispositivos').doc(req.params.id).update({
+    conectado: true,
+    ultimaConexion: admin.firestore.FieldValue.serverTimestamp()
+  })
+  .then(() => res.send({ status: 'Heartbeat recibido', conectado: true }))
+  .catch(err => res.status(500).send({ error: err.message }));
+});
+
+// Desconectar dispositivo
+app.post('/dispositivo/:id/desconectar', (req, res) => {
+  db.collection('dispositivos').doc(req.params.id).update({
+    conectado: false,
+    ultimaConexion: admin.firestore.FieldValue.serverTimestamp()
+  })
+  .then(() => res.send({ status: 'Dispositivo desconectado' }))
+  .catch(err => res.status(500).send({ error: err.message }));
 });
 
 // ESCUCHANDO EN LA RED LOCAL
