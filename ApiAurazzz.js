@@ -95,15 +95,17 @@ app.post('/procesar-audio', upload.single('audio_file'), async (req, res) => {
     console.log(`📡 ID del Dispositivo: ${req.body.id_dispositivo || 'No provisto'}`);
     console.log(`🔊 Intensidad medida por hardware: ${req.body.intensidad_db || '0'}`);
 
-    // 2. Empaquetamos todo para enviarlo a FastAPI
-    console.log('🚀 Empaquetando stream binario y enviando a FastAPI (Python)...');
+    // 2. Empaquetamos todo para enviarlo a FastAPI usando las llaves correctas
+    console.log('🚀 Empaquetando stream binario y enviando a Render FastAPI...');
     const form = new FormData();
     form.append('id_dispositivo', req.body.id_dispositivo || 'AURAZZZ_01');
-    form.append('intensidad', req.body.intensidad_db || 0);
-    form.append('file', fs.createReadStream(req.file.path), req.file.originalname);
+    form.append('intensidad_db', req.body.intensidad_db || 0); // Corrección para Python
+    form.append('audio_file', fs.createReadStream(req.file.path), req.file.originalname); // Corrección para Python
 
-    // 3. Petición a Python (Asegúrate de que uvicorn esté corriendo en el puerto 8000)
-    const urlPython = 'http://127.0.0.1:8000/analizar-evento';
+    // 3. Petición HTTPS directa a Render 
+    // REEMPLAZA ESTA URL POR LA URL REAL QUE TE DIO RENDER PARA TU API DE PYTHON
+    const urlPython = 'https://aurazzz-py.onrender.com/analizar-evento'; 
+    
     const respuestaPython = await axios.post(urlPython, form, {
       headers: { ...form.getHeaders() }
     });
@@ -189,4 +191,3 @@ app.post('/usuarios', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`API AuraZzz actualizada y corriendo en puerto ${PORT}`);
 });
-
